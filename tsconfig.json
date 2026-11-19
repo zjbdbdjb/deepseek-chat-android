@@ -18,5 +18,5 @@
     "noImplicitReturns": true,
     "useUnknownInCatchVariables": true
   },
-  "include": ["src", "rspack.config.ts"]
+  "include": ["src", "rspack.config.ts", "capacitor.config.ts"]
 }

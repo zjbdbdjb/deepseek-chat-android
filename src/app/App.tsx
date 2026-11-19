@@ -5,24 +5,32 @@ import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport
 import {
   bindChatPersistence,
   initChat,
+  onAutoReadAloud,
   retrySaveSessions,
   selectSession,
   useChatStore,
 } from '../services/chat/store.js'
+import { PromptModal } from '../components/prompts/PromptModal.js'
 import { SearchPanel } from '../components/search/SearchPanel.js'
-import { closeSearchPanel } from '../components/search/searchPanelState.js'
+import { closeSearchPanel, useSearchPanel } from '../components/search/searchPanelState.js'
 import { SessionView } from '../components/session/SessionView.js'
 import { MobileHeader } from '../components/session/MobileHeader.js'
 import { Welcome } from '../components/session/Welcome.js'
 import { ensureApiKey } from '../components/settings/settingsDialogState.js'
 import { SettingsDialog } from '../components/settings/SettingsDialog.js'
+import { closeTopModal } from '../components/base/Modal.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
 import { onUploadNotice } from '../services/attachments.js'
+import { setupNativeApp } from '../services/native/bridge.js'
 import { Button } from '../components/base/Button.js'
-import { stopReadAloud } from '../services/speech/readAloud.js'
+import {
+  describeReadAloudError,
+  stopReadAloud,
+  toggleReadAloud,
+} from '../services/speech/readAloud.js'
 import { CollapsedSider } from '../components/sider/CollapsedSider.js'
-import { closeMobileSider } from '../components/sider/mobileSiderState.js'
+import { closeMobileSider, useMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import styles from './App.module.css'
 
@@ -58,6 +66,16 @@ export const App = () => {
 
   // 文件数、存储空间达到上限时，附件上只显示「上传失败」，原因用 toast 说明
   useEffect(() => onUploadNotice(showToast), [])
+  useEffect(
+    () =>
+      onAutoReadAloud((messageId, text) => {
+        toggleReadAloud(messageId, text, (error) => {
+          const message = describeReadAloudError(error)
+          showToast(typeof message === 'string' ? message : { ...message, type: 'error' })
+        })
+      }),
+    []
+  )
   useEffect(bindChatPersistence, [])
 
   // 搜索结果面板只属于当前会话
@@ -72,6 +90,28 @@ export const App = () => {
     // 首次打开先在设置里输入 API Key
     ensureApiKey()
   }, [])
+
+  useEffect(
+    () =>
+      setupNativeApp({
+        onBack: () => {
+          if (closeTopModal()) {
+            return true
+          }
+          if (useSearchPanel.getState().entry !== null) {
+            closeSearchPanel()
+            return true
+          }
+          if (useMobileSider.getState().open) {
+            closeMobileSider()
+            return true
+          }
+          return false
+        },
+        onExitPrompt: () => showToast({ key: 'pressBackAgainToExit' }),
+      }),
+    []
+  )
 
   return (
     <>
@@ -133,6 +173,7 @@ export const App = () => {
         <SearchPanel />
       </div>
       <SettingsDialog />
+      <PromptModal />
       <Toast />
     </>
   )

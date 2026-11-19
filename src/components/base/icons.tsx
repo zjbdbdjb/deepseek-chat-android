@@ -523,3 +523,49 @@ export const IconToastError16 = () => (
     />
   </svg>
 )
+
+export const IconSparkleOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 1.5L9.65 6.35L14.5 8L9.65 9.65L8 14.5L6.35 9.65L1.5 8L6.35 6.35L8 1.5Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconShareOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 2.25V10M8 2.25L5.25 5M8 2.25L10.75 5M3 8.5V12.25C3 12.94 3.56 13.5 4.25 13.5H11.75C12.44 13.5 13 12.94 13 12.25V8.5"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconPinOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M9.8 2.4L13.6 6.2L12.3 7.5L11.4 6.6L8.7 9.3L9.3 11.4L8.2 12.5L5.8 10.1L2.6 13.3L1.7 12.4L4.9 9.2L2.5 6.8L3.6 5.7L5.7 6.3L8.4 3.6L7.5 2.7L8.8 1.4L9.8 2.4Z"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconCpuOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="4" width="8" height="8" rx="1.6" stroke="currentColor" strokeWidth="1.35" />
+    <path
+      d="M6.25 1.75V4M9.75 1.75V4M6.25 12V14.25M9.75 12V14.25M1.75 6.25H4M1.75 9.75H4M12 6.25H14.25M12 9.75H14.25"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
+  </svg>
+)

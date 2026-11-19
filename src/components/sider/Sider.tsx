@@ -1,8 +1,16 @@
 import clsx from 'clsx'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
-import { IconPanelLeftOutline16, IconSettingsOutline16, NewChatIcon } from '../base/icons.js'
-import { setSiderCollapsed } from '../../services/settings.js'
+import {
+  IconCloseFill14,
+  IconPanelLeftOutline16,
+  IconSearchOutline16,
+  IconSettingsOutline16,
+  NewChatIcon,
+} from '../base/icons.js'
+import { setSiderCollapsed, togglePinSession, useSettings } from '../../services/settings.js'
+import { exportSessionMarkdown } from '../../services/chat/exportMarkdown.js'
+import * as db from '../../services/chat/db.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
 import { newChat, removeSession, useChatStore } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
@@ -20,10 +28,48 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const t = useTranslate()
   const sessions = useChatStore((state) => state.sessions)
   const activeId = useChatStore((state) => state.activeId)
+  const pinnedSessionIds = useSettings((state) => state.pinnedSessionIds)
+  const [searchQuery, setSearchQuery] = useState('')
   const [now, setNow] = useState(Date.now)
-  const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
+  const pinnedSet = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
+  const groups = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    const filtered = query
+      ? sessions.filter((session) =>
+          (session.title || t('untitledChat')).toLowerCase().includes(query)
+        )
+      : sessions
+    const pinned: SessionSummary[] = []
+    const unpinned: SessionSummary[] = []
+    for (const session of filtered) {
+      if (pinnedSet.has(session.id)) {
+        pinned.push(session)
+      } else {
+        unpinned.push(session)
+      }
+    }
+    const timeGroups = groupSessions(unpinned, now, t)
+    return pinned.length > 0
+      ? [{ key: '__pinned__', label: t('pinnedSessionsLabel'), sessions: pinned }, ...timeGroups]
+      : timeGroups
+  }, [sessions, searchQuery, pinnedSet, now, t])
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+
+  const onExportSession = async (summary: SessionSummary) => {
+    try {
+      const cached = useChatStore.getState().sessionCache[summary.id]
+      const full = cached ?? (await db.loadSession(summary.id))
+      if (!full) {
+        showToast({ key: 'exportMarkdownFailed', type: 'error' })
+        return
+      }
+      await exportSessionMarkdown({ ...full, ...summary })
+      showToast({ key: 'exportMarkdownSuccess' })
+    } catch {
+      showToast({ key: 'exportMarkdownFailed', type: 'error' })
+    }
+  }
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -74,21 +120,51 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         </span>
         {t('newChat')}
       </button>
+      <div className={styles.searchBox}>
+        <span className={styles.searchIcon} aria-hidden>
+          <IconSearchOutline16 />
+        </span>
+        <input
+          type="search"
+          className={styles.searchInput}
+          value={searchQuery}
+          placeholder={t('searchSessionsPlaceholder')}
+          aria-label={t('searchSessionsPlaceholder')}
+          onChange={(event) => setSearchQuery(event.target.value)}
+        />
+        {searchQuery ? (
+          <button
+            type="button"
+            className={styles.searchClear}
+            aria-label={t('close')}
+            onClick={() => setSearchQuery('')}
+          >
+            <IconCloseFill14 />
+          </button>
+        ) : null}
+      </div>
       <div className={styles.listWrap}>
         <div className={styles.list}>
-          {groups.map((group) => (
-            <div key={group.key} className={styles.section}>
-              <div className={styles.sectionHeader}>{group.label}</div>
-              {group.sessions.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  session={session}
-                  active={session.id === activeId}
-                  onDelete={() => setDeleting(session)}
-                />
-              ))}
-            </div>
-          ))}
+          {groups.length === 0 && searchQuery.trim() ? (
+            <div className={styles.emptySearch}>{t('searchSessionsEmpty')}</div>
+          ) : (
+            groups.map((group) => (
+              <div key={group.key} className={styles.section}>
+                <div className={styles.sectionHeader}>{group.label}</div>
+                {group.sessions.map((session) => (
+                  <SessionItem
+                    key={session.id}
+                    session={session}
+                    active={session.id === activeId}
+                    pinned={pinnedSet.has(session.id)}
+                    onTogglePin={() => togglePinSession(session.id)}
+                    onExport={() => void onExportSession(session)}
+                    onDelete={() => setDeleting(session)}
+                  />
+                ))}
+              </div>
+            ))
+          )}
         </div>
       </div>
       <div className={styles.bottom}>

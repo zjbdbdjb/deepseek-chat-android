@@ -1,6 +1,8 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  IconCloseFill14,
+  IconCpuOutline16,
   IconDarkOutline16,
   IconDataOutline16,
   IconDownloadOutline16,
@@ -15,18 +17,33 @@ import {
   exportHistory,
   importHistory,
 } from '../../services/chat/backup.js'
+import { saveOrShareFile } from '../../services/native/bridge.js'
+import { DEFAULT_SYSTEM_PROMPT, getBuiltinPresets } from '../../services/prompts.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
+  addCustomPreset,
+  deleteCustomPreset,
   isChineseBrowser,
+  setApiOrigin,
+  setFontSize,
   setLocale,
   setLocation,
+  setModel,
+  setShowTokenUsage,
+  setSystemPrompt,
   setThemePreference,
   setTtsVoice,
+  setVoiceAutoReadAloud,
+  setVoiceAutoSend,
+  setVoiceEngine,
   useSettings,
+  type FontSizePreference,
   type ThemePreference,
+  type VoiceEngine,
 } from '../../services/settings.js'
+import type { ChatModel } from '../../services/api/types.js'
 import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
@@ -50,6 +67,11 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
     value: 'general',
     label: 'settingDialogAsideGeneralOptionLabel',
     icon: <IconSettingsOutline16 />,
+  },
+  {
+    value: 'model',
+    label: 'settingDialogAsideModelOptionLabel',
+    icon: <IconCpuOutline16 />,
   },
   { value: 'data', label: 'settingDialogAsideDataOptionLabel', icon: <IconDataOutline16 /> },
 ]
@@ -97,13 +119,24 @@ const SettingsContent = () => {
           {section === 'general' ? (
             <>
               <ThemeSetting />
+              <FontSizeSetting />
               <LocaleSetting />
+              <VoiceEngineSetting />
+              <VoiceAutoSendSetting />
+              <VoiceAutoReadSetting />
               <TtsVoiceSetting />
+              <ShowTokenUsageSetting />
               <LocationSetting />
+            </>
+          ) : section === 'model' ? (
+            <>
+              <ModelSetting />
+              <SystemPromptSetting />
             </>
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />
+              <ApiOriginSetting />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
@@ -311,6 +344,349 @@ const TtsVoiceSetting = () => {
         />
       }
     />
+  )
+}
+
+const fontSizeOptions: { value: FontSizePreference; label: TranslationKey }[] = [
+  { value: 'small', label: 'settingsFontSizeSmall' },
+  { value: 'medium', label: 'settingsFontSizeMedium' },
+  { value: 'large', label: 'settingsFontSizeLarge' },
+]
+
+const FontSizeSetting = () => {
+  const t = useTranslate()
+  const fontSize = useSettings((state) => state.fontSize)
+  return (
+    <SettingCell
+      label={t('settingsFontSizeLabel')}
+      status={null}
+      action={
+        <div role="radiogroup" aria-label={t('settingsFontSizeLabel')} className={styles.segment}>
+          {fontSizeOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={fontSize === option.value}
+              className={clsx(
+                styles.segmentOption,
+                fontSize === option.value && styles.segmentOptionActive
+              )}
+              onClick={() => setFontSize(option.value)}
+            >
+              {t(option.label)}
+            </button>
+          ))}
+        </div>
+      }
+    />
+  )
+}
+
+const VoiceEngineSetting = () => {
+  const t = useTranslate()
+  const voiceEngine = useSettings((state) => state.voiceEngine)
+  return (
+    <SettingCell
+      label={t('settingsVoiceEngineLabel')}
+      description={t('settingsVoiceEngineDescription')}
+      status={null}
+      action={
+        <Select<VoiceEngine>
+          ariaLabel={t('settingsVoiceEngineLabel')}
+          value={voiceEngine}
+          options={[
+            { value: 'api', label: t('settingsVoiceEngineApi') },
+            { value: 'browser', label: t('settingsVoiceEngineBrowser') },
+          ]}
+          onChange={setVoiceEngine}
+        />
+      }
+    />
+  )
+}
+
+const ToggleSettingCell = ({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string
+  description?: string
+  checked: boolean
+  onChange: (next: boolean) => void
+}) => (
+  <SettingCell
+    label={label}
+    description={description}
+    status={null}
+    action={
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        className={clsx(styles.switch, checked && styles.switchChecked)}
+        onClick={() => onChange(!checked)}
+      >
+        <span className={styles.switchThumb} />
+      </button>
+    }
+  />
+)
+
+const VoiceAutoSendSetting = () => {
+  const t = useTranslate()
+  const checked = useSettings((state) => state.voiceAutoSend)
+  return (
+    <ToggleSettingCell
+      label={t('settingsVoiceAutoSendLabel')}
+      description={t('settingsVoiceAutoSendDescription')}
+      checked={checked}
+      onChange={setVoiceAutoSend}
+    />
+  )
+}
+
+const VoiceAutoReadSetting = () => {
+  const t = useTranslate()
+  const checked = useSettings((state) => state.voiceAutoReadAloud)
+  return (
+    <ToggleSettingCell
+      label={t('settingsVoiceAutoReadLabel')}
+      description={t('settingsVoiceAutoReadDescription')}
+      checked={checked}
+      onChange={setVoiceAutoReadAloud}
+    />
+  )
+}
+
+const ShowTokenUsageSetting = () => {
+  const t = useTranslate()
+  const checked = useSettings((state) => state.showTokenUsage)
+  return (
+    <ToggleSettingCell
+      label={t('settingsShowTokenUsageLabel')}
+      description={t('settingsShowTokenUsageDescription')}
+      checked={checked}
+      onChange={setShowTokenUsage}
+    />
+  )
+}
+
+const ModelSetting = () => {
+  const t = useTranslate()
+  const model = useSettings((state) => state.model)
+  return (
+    <SettingCell
+      label={t('settingsModelLabel')}
+      description={t('settingsModelDescription')}
+      status={null}
+      action={
+        <Select<ChatModel>
+          ariaLabel={t('settingsModelLabel')}
+          value={model}
+          options={[
+            { value: 'deepseek-flash', label: t('settingsModelFlash') },
+            { value: 'deepseek-v4-pro', label: t('settingsModelPro') },
+          ]}
+          onChange={setModel}
+        />
+      }
+    />
+  )
+}
+
+const SystemPromptSetting = () => {
+  const t = useTranslate()
+  const locale = useSettings((state) => state.locale)
+  const systemPrompt = useSettings((state) => state.systemPrompt)
+  const customPresets = useSettings((state) => state.customPresets)
+  const [draft, setDraft] = useState(systemPrompt)
+  const [presetName, setPresetName] = useState('')
+
+  const presets = useMemo(
+    () => [...customPresets, ...getBuiltinPresets(locale)],
+    [customPresets, locale]
+  )
+
+  const applyValue = (next: string) => {
+    setDraft(next)
+    setSystemPrompt(next)
+  }
+
+  const onSavePreset = () => {
+    const created = addCustomPreset(presetName, draft)
+    if (created) {
+      setPresetName('')
+      showToast({ key: 'promptPresetSaved' })
+    }
+  }
+
+  const effective = draft.trim() || DEFAULT_SYSTEM_PROMPT
+
+  return (
+    <div className={clsx(styles.cell, styles.promptSection)}>
+      <div className={styles.promptHeader}>
+        <div className={styles.text}>
+          <div className={styles.label}>{t('settingsSystemPromptLabel')}</div>
+          <div className={styles.description}>{t('settingsSystemPromptDescription')}</div>
+        </div>
+        <Button
+          variant="outlined"
+          size="s"
+          disabled={!draft.trim()}
+          onClick={() => {
+            applyValue('')
+            showToast({ key: 'promptSaved' })
+          }}
+        >
+          {t('settingsSystemPromptReset')}
+        </Button>
+      </div>
+      <div className={styles.presetChips}>
+        {presets.map((preset) => {
+          const isDefault = preset.prompt === DEFAULT_SYSTEM_PROMPT
+          const active = (isDefault && !draft.trim()) || effective === preset.prompt.trim()
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              className={clsx(styles.presetChip, active && styles.presetChipActive)}
+              onClick={() => {
+                applyValue(isDefault ? '' : preset.prompt)
+                showToast({ key: 'promptSaved' })
+              }}
+            >
+              <span>{preset.name}</span>
+              {!preset.builtin ? (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className={styles.presetChipDelete}
+                  aria-label={t('delete')}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    deleteCustomPreset(preset.id)
+                    showToast({ key: 'promptPresetDeleted' })
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      deleteCustomPreset(preset.id)
+                      showToast({ key: 'promptPresetDeleted' })
+                    }
+                  }}
+                >
+                  <IconCloseFill14 />
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+      <textarea
+        className={styles.promptTextarea}
+        value={draft}
+        placeholder={t('settingsSystemPromptPlaceholder')}
+        onChange={(event) => {
+          setDraft(event.target.value)
+          setSystemPrompt(event.target.value)
+        }}
+      />
+      <div className={styles.inlineRow}>
+        <input
+          type="text"
+          className={styles.inlineInput}
+          maxLength={24}
+          value={presetName}
+          placeholder={t('promptPresetNamePlaceholder')}
+          onChange={(event) => setPresetName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              onSavePreset()
+            }
+          }}
+        />
+        <Button
+          variant="outlined"
+          size="m"
+          disabled={!presetName.trim() || !draft.trim()}
+          onClick={onSavePreset}
+        >
+          {t('promptSaveAsPreset')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+const ApiOriginSetting = () => {
+  const t = useTranslate()
+  const apiOrigin = useSettings((state) => state.apiOrigin)
+  const [draft, setDraft] = useState(apiOrigin)
+  const [error, setError] = useState<string | null>(null)
+
+  const onSave = () => {
+    if (!setApiOrigin(draft)) {
+      setError(t('settingsApiOriginInvalid'))
+      return
+    }
+    setError(null)
+    setDraft(useSettings.getState().apiOrigin)
+    showToast({ key: 'settingsApiOriginSaved' })
+  }
+
+  const onReset = () => {
+    setApiOrigin('')
+    setDraft('')
+    setError(null)
+    showToast({ key: 'settingsApiOriginSaved' })
+  }
+
+  return (
+    <div className={clsx(styles.cell, styles.promptSection)}>
+      <div className={styles.promptHeader}>
+        <div className={styles.text}>
+          <div className={styles.label}>{t('settingsApiOriginLabel')}</div>
+          <div className={styles.description}>{t('settingsApiOriginDescription')}</div>
+        </div>
+        {apiOrigin ? (
+          <Button variant="outlined" size="s" onClick={onReset}>
+            {t('settingsApiOriginReset')}
+          </Button>
+        ) : null}
+      </div>
+      <div className={styles.inlineRow}>
+        <input
+          type="url"
+          className={styles.inlineInput}
+          value={draft}
+          spellCheck={false}
+          autoComplete="off"
+          placeholder={t('settingsApiOriginPlaceholder')}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            if (error) {
+              setError(null)
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              onSave()
+            }
+          }}
+        />
+        <Button variant="outlined" size="m" disabled={draft.trim() === apiOrigin} onClick={onSave}>
+          {t('save')}
+        </Button>
+      </div>
+      {error ? <div className={styles.error}>{error}</div> : null}
+    </div>
   )
 }
 
@@ -524,12 +900,7 @@ const ExportHistory = ({ disabled }: { disabled: boolean }) => {
     setStatus(null)
     try {
       const { name, blob } = await exportHistory()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = name
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      await saveOrShareFile(blob, name)
     } catch (error) {
       setStatus(errorStatus('historyExportFailed', error))
     } finally {

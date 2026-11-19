@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconGlobeLanguageOutline14,
   IconPaperclipOutline16,
@@ -56,6 +56,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
+  const [liveTranscript, setLiveTranscript] = useState('')
 
   useLayoutEffect(() => {
     const toggles = togglesRef.current
@@ -101,17 +102,47 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   )
   const dragging = useFileDrop(acceptFiles)
 
-  /** 转写结果插入到光标处，并把光标移到插入内容之后 */
-  const voice = useVoiceInput((transcript) => {
-    const textarea = textareaRef.current
-    const current = getDraft(sessionId).text
-    const start = textarea?.selectionStart ?? current.length
-    const end = textarea?.selectionEnd ?? current.length
-    setText(current.slice(0, start) + transcript + current.slice(end))
-    requestAnimationFrame(() => {
-      textarea?.focus({ preventScroll: true })
-      textarea?.setSelectionRange(start + transcript.length, start + transcript.length)
-    })
+  const submitDraft = useCallback(
+    (fromVoice = false) => {
+      if (
+        useChatStore.getState().importingHistory ||
+        !prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)
+      ) {
+        return
+      }
+      if (!ensureApiKey() || !sendMessage(sessionId, { fromVoice })) {
+        return
+      }
+      stopReadAloud()
+      if (isMobile) {
+        textareaRef.current?.blur()
+      } else {
+        textareaRef.current?.focus()
+      }
+    },
+    [sessionId, isMobile]
+  )
+
+  /** 转写结果插入到光标处；若开启语音自动发送则直接发出 */
+  const voice = useVoiceInput({
+    onInterim: setLiveTranscript,
+    onText: (transcript, { autoSend }) => {
+      setLiveTranscript('')
+      const textarea = textareaRef.current
+      const current = getDraft(sessionId).text
+      const start = textarea?.selectionStart ?? current.length
+      const end = textarea?.selectionEnd ?? current.length
+      const merged = current.slice(0, start) + transcript + current.slice(end)
+      setText(merged)
+      if (autoSend && merged.trim()) {
+        submitDraft(true)
+        return
+      }
+      requestAnimationFrame(() => {
+        textarea?.focus({ preventScroll: true })
+        textarea?.setSelectionRange(start + transcript.length, start + transcript.length)
+      })
+    },
   })
 
   // 欢迎页导入后会话 ID 不变，不能依赖卸载取消语音；订阅开始事件也覆盖快速完成的导入。
@@ -126,30 +157,18 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     [cancelVoice]
   )
 
-  // 移动端录音时用频谱替代输入框内容
+  // 移动端云端录音时用频谱替代输入框内容；系统实时识别则实时显示字幕
   const recording = voice.status === 'recording'
+  const showSpectrum = recording && isMobile && !voice.liveMode
 
   // 排队、上传中或上传失败的附件都留在输入框，全部上传成功后才能发送
   const canSend = !importingHistory && !streaming && voice.status === 'idle' && draftReady
 
   const send = () => {
-    if (
-      useChatStore.getState().importingHistory ||
-      voice.status !== 'idle' ||
-      !prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)
-    ) {
+    if (voice.status !== 'idle') {
       return
     }
-    // 文本与上传完成态由提交动作读取最新快照，不使用上一次渲染的草稿。
-    if (!ensureApiKey() || !sendMessage(sessionId)) {
-      return
-    }
-    stopReadAloud()
-    if (isMobile) {
-      textareaRef.current?.blur()
-    } else {
-      textareaRef.current?.focus()
-    }
+    submitDraft(false)
   }
 
   return (
@@ -165,14 +184,22 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       <div className={styles.textareaWrapper}>
         <textarea
           ref={textareaRef}
-          className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
-          placeholder={t('chatInputPlaceholderChat')}
+          className={clsx(styles.textarea, showSpectrum && styles.textareaHidden)}
+          placeholder={
+            recording && voice.liveMode
+              ? t('voiceInputLiveListening')
+              : t('chatInputPlaceholderChat')
+          }
           rows={2}
           // 移动端不自动聚焦，避免一打开就弹出键盘
           autoFocus={!isMobile}
           disabled={importingHistory}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
+          value={recording && voice.liveMode ? `${text}${liveTranscript}` : text}
+          onChange={(event) => {
+            if (!recording || !voice.liveMode) {
+              setText(event.target.value)
+            }
+          }}
           onMouseDown={(event) => {
             // 首次点击时手动聚焦，避免 Safari 把整个页面滚到输入框位置。
             if (isMobile && event.button === 0 && document.activeElement !== event.currentTarget) {
@@ -194,9 +221,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             }
           }}
         />
-        {recording && isMobile ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
+        {showSpectrum ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
         <div className={styles.mirror} aria-hidden>
-          {`${text}\n`}
+          {`${recording && voice.liveMode ? `${text}${liveTranscript}` : text}\n`}
         </div>
       </div>
       <div className={styles.functionRow}>
@@ -228,14 +255,24 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           </Tooltip>
         </div>
         <div className={styles.right}>
+          {recording ? (
+            <button
+              type="button"
+              className={styles.voiceCancelButton}
+              onClick={voice.cancel}
+            >
+              {t('voiceInputCancelRecording')}
+            </button>
+          ) : null}
           <VoiceButton
             status={voice.status}
             disabled={!voice.available}
             seconds={voice.seconds}
             onClick={() => {
+              const needsApiKey = useSettings.getState().voiceEngine === 'api'
               if (
                 voice.status !== 'idle' ||
-                (!useChatStore.getState().importingHistory && ensureApiKey())
+                (!useChatStore.getState().importingHistory && (!needsApiKey || ensureApiKey()))
               ) {
                 void voice.toggle()
               }

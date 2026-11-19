@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { syncNativeTheme } from '../services/native/bridge.js'
 import { useSettings, type ThemePreference } from '../services/settings.js'
 
 export type Theme = 'light' | 'dark'
@@ -41,6 +42,7 @@ const applyTheme = (theme: Theme) => {
     body.removeAttribute('data-ds-dark-theme')
   }
   document.documentElement.style.colorScheme = theme
+  syncNativeTheme(theme)
   // 首次背景色同步在样式表加载完成后执行，适配 WebKit 的 defer 脚本执行顺序。
   if (document.readyState === 'complete') {
     syncPageBackground()
@@ -52,7 +54,12 @@ const applyTheme = (theme: Theme) => {
 
 let appliedTheme: Theme | null = null
 
+const syncFontSize = () => {
+  document.documentElement.dataset.fontSize = useSettings.getState().fontSize
+}
+
 const syncTheme = () => {
+  syncFontSize()
   const theme = resolveTheme(useSettings.getState().themePreference, getOsTheme())
   if (theme !== appliedTheme) {
     appliedTheme = theme

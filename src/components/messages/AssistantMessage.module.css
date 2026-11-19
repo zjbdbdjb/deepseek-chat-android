@@ -108,6 +108,15 @@
   margin-left: auto;
 }
 
+.usageMeta {
+  margin-left: 2px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  user-select: none;
+  white-space: nowrap;
+}
+
 .summary {
   display: flex;
   align-items: center;

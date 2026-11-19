@@ -1,15 +1,18 @@
 import { useTranslate } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo } from 'react'
-import { IconRefreshOutline16, IconWarningOutline16 } from '../base/icons.js'
+import { IconRefreshOutline16, IconShareOutline16, IconWarningOutline16 } from '../base/icons.js'
 import { describeReply } from '../../services/chat/describe.js'
 import { canContinueReply } from '../../services/chat/reply.js'
 import { continueReply, regenerateReply } from '../../services/chat/store.js'
+import { shareText } from '../../services/native/bridge.js'
+import { useSettings } from '../../services/settings.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { IconButton } from '../base/IconButton.js'
 import { Button } from '../base/Button.js'
+import { showToast } from '../base/toastState.js'
 import { Markdown } from '../markdown/Markdown.js'
 import { SiteThumbnails } from '../search/SiteLogo.js'
 import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js'
@@ -25,6 +28,9 @@ import {
 import styles from './AssistantMessage.module.css'
 
 const TOP_UP_URL = 'https://platform.deepseek.com/top_up'
+
+const formatTokens = (count: number) =>
+  count >= 1000 ? `${(count / 1000).toFixed(count >= 10_000 ? 0 : 1)}k` : String(count)
 
 export const AssistantMessage = memo(function AssistantMessage({
   sessionId,
@@ -44,6 +50,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   onSelectVersion: SelectMessageVersion
 }) {
   const t = useTranslate()
+  const showTokenUsage = useSettings((state) => state.showTokenUsage)
   const view = useReplyView(message, streaming)
   const panelEntry = useSearchPanel((state) => state.entry)
   const notice = streaming ? null : describeReply(message)
@@ -144,6 +151,19 @@ export const AssistantMessage = memo(function AssistantMessage({
           <div className={clsx(styles.actions, isLast && styles.alwaysShow)}>
             {copyText ? <CopyButton text={copyText} /> : null}
             {responseText && !refused ? (
+              <IconButton
+                icon={<IconShareOutline16 />}
+                tooltip={t('shareReply')}
+                tooltipPlacement="bottom"
+                onClick={async () => {
+                  const result = await shareText(responseText)
+                  if (result === 'copied') {
+                    showToast({ key: 'shareCopiedFallback' })
+                  }
+                }}
+              />
+            ) : null}
+            {responseText && !refused ? (
               <ReadAloudButton messageId={message.id} text={responseText} />
             ) : null}
             <IconButton
@@ -157,6 +177,24 @@ export const AssistantMessage = memo(function AssistantMessage({
               }}
             />
           </div>
+          {showTokenUsage && message.usage ? (
+            <span className={styles.usageMeta}>
+              {message.model === 'deepseek-v4-pro' ? 'V4 Pro' : 'Flash'}
+              {' · ↑'}
+              {formatTokens(
+                message.usage.input_tokens +
+                  message.usage.cache_creation_input_tokens +
+                  message.usage.cache_read_input_tokens
+              )}
+              {' ↓'}
+              {formatTokens(message.usage.output_tokens)}
+              {message.usage.cache_read_input_tokens > 0
+                ? ` (${t('tokenUsageCached', {
+                    count: formatTokens(message.usage.cache_read_input_tokens),
+                  })})`
+                : ''}
+            </span>
+          ) : null}
           {isLast && canContinueReply(message) ? (
             <Button
               variant="outlined"

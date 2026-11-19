@@ -1,0 +1,151 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional tag name to publish a GitHub Release (e.g. v1.0.0)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm type
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build web bundle and sync Capacitor Android
+        run: pnpm android:sync
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licenses
+        run: |
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          fi
+
+      - name: Decode signing keystore (optional)
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            KEYSTORE_FILE="${RUNNER_TEMP}/release.keystore"
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+            echo "keystore_path=$KEYSTORE_FILE" >> "$GITHUB_OUTPUT"
+          else
+            echo "keystore_path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine app version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION_NAME="${TAG#v}"
+          elif [ -n "${{ inputs.release_tag }}" ]; then
+            TAG="${{ inputs.release_tag }}"
+            VERSION_NAME="${TAG#v}"
+          else
+            TAG=""
+            VERSION_NAME="$(node -p "require('./package.json').version")"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Android Release APK
+        working-directory: android
+        env:
+          ANDROID_VERSION_NAME: ${{ steps.version.outputs.name }}
+          ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          ANDROID_KEYSTORE_PATH: ${{ steps.signing.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Prepare APK and checksum
+        id: package
+        run: |
+          VERSION_NAME="${{ steps.version.outputs.name }}"
+          APK_SOURCE="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SOURCE" ]; then
+            APK_SOURCE="$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          fi
+          mkdir -p release-assets
+          APK_DEST="release-assets/DeepSeek-Chat-v${VERSION_NAME}.apk"
+          cp "$APK_SOURCE" "$APK_DEST"
+          (cd release-assets && sha256sum "DeepSeek-Chat-v${VERSION_NAME}.apk" > SHA256SUMS.txt)
+          echo "apk_path=${APK_DEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeek-Chat-v${{ steps.version.outputs.name }}-apk
+          path: release-assets/*
+
+      - name: Publish GitHub Release
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION_NAME="${{ steps.version.outputs.name }}"
+          NOTES=$(cat <<EOF
+          ## DeepSeek Chat Android App (${TAG})
+
+          基于官方开源项目 [deepseek-ai/chat-demo](https://github.com/deepseek-ai/chat-demo) 打包并深度适配的安卓客户端。
+
+          ### 下载与安装 / Download & Install
+          1. 在下方 **Assets** 中下载 \`DeepSeek-Chat-v${VERSION_NAME}.apk\`。
+          2. 在安卓手机上打开并允许安装未知来源应用即可完成安装。
+          3. 首次打开后，在 **设置 → 数据管理** 中填入你的 DeepSeek API Key 即可开始对话（所有对话与密钥均仅保存在手机本地）。
+          EOF
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "DeepSeek Chat ${TAG}" \
+              --notes "$NOTES"
+          fi

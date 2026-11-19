@@ -59,3 +59,9 @@
     transform: translateY(-8px);
   }
 }
+
+@media not all and (min-width: 768px) {
+  .toast {
+    top: calc(64px + env(safe-area-inset-top, 0px));
+  }
+}
